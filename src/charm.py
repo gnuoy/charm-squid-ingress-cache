@@ -22,30 +22,7 @@ from charms.nginx_ingress_integrator.v0.ingress import IngressRequires
 
 logger = logging.getLogger(__name__)
 
-
-class SquidCacheCharm(CharmBase):
-    """Charm the service."""
-
-    _stored = StoredState()
-
-    def __init__(self, *args):
-        super().__init__(*args)
-        self.framework.observe(self.on.squid_pebble_ready, self._on_squid_pebble_ready)
-        self.framework.observe(self.on.config_changed, self._on_config_changed)
-#        self.framework.observe(self.on.fortune_action, self._on_fortune_action)
-        self._stored.set_default(things=[])
-        self.ingress = None
-
-    def _update_files(self):
-        container = self.unit.get_container("squid")
-        relation = self.model.get_relation("cache")
-        hostname = relation.data[relation.app]["service-hostname"]
-        _svc_name = relation.data[relation.app]["service-name"]
-        port = relation.data[relation.app]["service-port"]
-        # f"{self.unit.name}.{self.app.name}-endpoints.{self.model.name}.svc.cluster.local"
-        svc_name = f"norwich-0.{self.app.name}-endpoints.{self.model.name}.svc.cluster.local"
-        svc_name = f"norwich-0.norwich-endpoints.norwich.svc.cluster.local"
-        squid_template = f"""
+SQUID_TEMPLATE = """
 acl localnet src 0.0.0.1-0.255.255.255	# RFC 1122 "this" network (LAN)
 acl localnet src 10.0.0.0/8		# RFC 1918 local private network (LAN)
 acl localnet src 100.64.0.0/10		# RFC 6598 shared address space (CGN)
@@ -66,7 +43,6 @@ acl Safe_ports port 488		# gss-http
 acl Safe_ports port 591		# filemaker
 acl Safe_ports port 777		# multiling http
 acl CONNECT method CONNECT
-#http_access allow hp_users
 http_access deny !Safe_ports
 http_access deny CONNECT !SSL_ports
 http_access allow localhost manager
@@ -75,8 +51,7 @@ include /etc/squid/conf.d/*
 http_access allow localhost
 http_access allow localnet
 http_access deny all
-http_port 3128 accel
-cache_peer {svc_name} parent {port} 0 no-query originserver name=hp
+#http_port 3128 accel
 coredump_dir /var/spool/squid
 refresh_pattern ^ftp:		1440	20%	10080
 refresh_pattern ^gopher:	1440	0%	1440
@@ -87,6 +62,35 @@ refresh_pattern \/InRelease$ 0 0% 0 refresh-ims
 refresh_pattern \/(Translation-.*)(|\.bz2|\.gz|\.xz)$ 0 0% 0 refresh-ims
 refresh_pattern .		0	20%	4320
 """
+
+class SquidCacheCharm(CharmBase):
+    """Charm the service."""
+
+    _stored = StoredState()
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.framework.observe(self.on.squid_pebble_ready, self._on_squid_pebble_ready)
+        self.framework.observe(self.on.config_changed, self._on_config_changed)
+#        self.framework.observe(self.on.fortune_action, self._on_fortune_action)
+        self.framework.observe(self.on.ingress_relation_joined, self._ingress_relation_joined)
+        self._stored.set_default(things=[])
+        self.ingress = None
+        # XXX Remove self._advertise_ingress_info
+        self._advertise_ingress_info()
+
+    def _update_files(self):
+        container = self.unit.get_container("squid")
+        relation = self.model.get_relation("cache")
+        hostname = relation.data[relation.app]["service-hostname"]
+        svc_name = relation.data[relation.app]["service-name"]
+        port = relation.data[relation.app]["service-port"]
+        squid_template = SQUID_TEMPLATE + f"http_port {port} accel\n"
+        cache_peers = [u.name.replace('/', '-') for u in relation.units]
+        for peer in cache_peers:
+            peer_fqdn = f"{peer}.{svc_name}-endpoints.{self.model.name}.svc.cluster.local"
+            logger.error("Appending for {}".format(peer_fqdn))
+            squid_template = squid_template + f"cache_peer {peer_fqdn} parent {port} 0 no-query originserver"
         logger.error("Pushing new squid.conf")
         logger.error(squid_template)
         container.push("/etc/squid/squid.conf", squid_template)
@@ -101,11 +105,8 @@ refresh_pattern .		0	20%	4320
 
         Learn more about Pebble layers at https://github.com/canonical/pebble
         """
-#                    "service-hostname": relation.data[relation.app].get("service-hostname", ""),
-#                    "service-name": relation.data[relation.app].get("service-name", ""),
-#                    "service-port": relation.data[relation.app].get("service-port", ""),
-        # Get a reference the container attribute on the PebbleReadyEvent
         self._update_files()
+        # Get a reference the container attribute on the PebbleReadyEvent
         container = event.workload
         # Define an initial Pebble layer configuration
         pebble_layer = {
@@ -129,16 +130,24 @@ refresh_pattern .		0	20%	4320
         self._advertise_ingress_info()
 
     def _advertise_ingress_info(self):
-        relation = self.model.get_relation("cache")
-        if relation:
-            self.ingress = IngressRequires(
-                self, 
-                {
-                    "service-hostname": relation.data[relation.app].get("service-hostname", ""),
-                    "service-name": self.app.name,
-                    "service-port": 3128,
-                }
-            )
+        ingress_relation = self.model.get_relation("ingress")
+        cache_relation = self.model.get_relation("cache")
+        if ingress_relation and cache_relation:
+            ingress_config = {
+                "service-hostname": cache_relation.data[cache_relation.app].get("service-hostname", "dummy"),
+                "service-name": self.app.name,
+                "service-port": cache_relation.data[cache_relation.app].get("service-port", "80"),
+            }
+            if self.ingress:
+                self.ingress.update_config(ingress_config)
+            else:
+                self.ingress = IngressRequires(
+                    self, 
+                    ingress_config,
+                )
+
+    def _ingress_relation_joined(self, _):
+        self._advertise_ingress_info()
 
     def _on_config_changed(self, _):
         """Just an example to show how to deal with changed configuration.
