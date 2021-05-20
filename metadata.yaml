@@ -1,0 +1,30 @@
+# Copyright 2021 liam
+# See LICENSE file for licensing details.
+name: squid-cache
+description: |
+  TEMPLATE-TODO: fill out the charm's description
+summary: |
+  TEMPLATE-TODO: fill out the charm's summary
+
+resources:
+  httpbin-image:
+    type: oci-image
+    description: OCI image for httpbin (kennethreitz/httpbin)
+
+containers:
+  squid:
+    resource: squid-image
+
+resources:
+  squid-image:
+    type: oci-image
+    description: OCI image for squid
+
+requires:
+  ingress:
+    interface: ingress
+
+provides:
+  cache:
+    interface: ingress
+
