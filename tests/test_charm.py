@@ -36,7 +36,7 @@ class TestCharm(unittest.TestCase):
 #        self.assertEqual(action_event.fail.call_args, [("fail this",)])
 
     def add_cache_relation(self):
-        rel_id = self.harness.add_relation('cache', 'squid-cache')
+        rel_id = self.harness.add_relation('ingress-proxy', 'squid-cache')
         self.harness.add_relation_unit(
             rel_id,
             'squid-cache')
@@ -56,7 +56,7 @@ class TestCharm(unittest.TestCase):
         # self.model.name is None in test harness.
         self.assertEqual(
             self.harness.charm.get_cache_peers(
-                self.harness.model.get_relation("cache")),
+                self.harness.model.get_relation("ingress-proxy")),
             ['squid-cache.website-endpoints.None.svc.cluster.local'])
 
     def test_httpbin_pebble_ready(self):
@@ -89,12 +89,12 @@ class TestCharm(unittest.TestCase):
         # Ensure we set an ActiveStatus with no message
         self.assertEqual(self.harness.model.unit.status, ActiveStatus())
 
-    def test_cache_relation_ready(self):
+    def test_ingress_proxy_relation_ready(self):
         # Check False when there is no cache relation.
-        self.assertFalse(self.harness.charm.cache_relation_ready())
-        rel_id = self.harness.add_relation('cache', 'squid-cache')
+        self.assertFalse(self.harness.charm.ingress_proxy_relation_ready())
+        rel_id = self.harness.add_relation('ingress-proxy', 'squid-cache')
         # Check False with a cache relation but no relation data.
-        self.assertFalse(self.harness.charm.cache_relation_ready())
+        self.assertFalse(self.harness.charm.ingress_proxy_relation_ready())
         self.harness.add_relation_unit(
             rel_id,
             'squid-cache')
@@ -106,7 +106,7 @@ class TestCharm(unittest.TestCase):
                 'service-port': 80,
             })
         # Check False with a cache relation but incomplete relation data.
-        self.assertFalse(self.harness.charm.cache_relation_ready())
+        self.assertFalse(self.harness.charm.ingress_proxy_relation_ready())
         self.harness.update_relation_data(
             rel_id,
             'squid-cache',
@@ -116,7 +116,7 @@ class TestCharm(unittest.TestCase):
                 'service-port': 80,
             })
         # Check True with a cache relation and all relation data.
-        self.assertTrue(self.harness.charm.cache_relation_ready())
+        self.assertTrue(self.harness.charm.ingress_proxy_relation_ready())
 
     def test_get_ingress_config(self):
         self.assertEqual(
