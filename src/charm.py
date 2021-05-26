@@ -17,8 +17,12 @@ import logging
 from ops.charm import CharmBase
 from ops.framework import StoredState
 from ops.main import main
-from ops.model import ActiveStatus
-from charms.nginx_ingress_integrator.v0.ingress import IngressRequires
+from ops.model import ActiveStatus, BlockedStatus
+from charms.nginx_ingress_integrator.v0.ingress import (
+    IngressRequires,
+    REQUIRED_INGRESS_RELATION_FIELDS,
+    OPTIONAL_INGRESS_RELATION_FIELDS
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +55,6 @@ include /etc/squid/conf.d/*
 http_access allow localhost
 http_access allow localnet
 http_access deny all
-#http_port 3128 accel
 coredump_dir /var/spool/squid
 refresh_pattern ^ftp:		1440	20%	10080
 refresh_pattern ^gopher:	1440	0%	1440
@@ -62,6 +65,10 @@ refresh_pattern \/InRelease$ 0 0% 0 refresh-ims
 refresh_pattern \/(Translation-.*)(|\.bz2|\.gz|\.xz)$ 0 0% 0 refresh-ims
 refresh_pattern .		0	20%	4320
 """
+CACHE_REQUIRED_CONFIG = {'service-hostname', 'service-name', 'service-port'}
+LISTEN_REVERSE_PROXY = "http_port {port} accel"
+CACHE_PEER_LINE = "cache_peer {peer} parent {port} 0 no-query originserver"
+
 
 class SquidCacheCharm(CharmBase):
     """Charm the service."""
@@ -70,30 +77,47 @@ class SquidCacheCharm(CharmBase):
 
     def __init__(self, *args):
         super().__init__(*args)
-        self.framework.observe(self.on.squid_pebble_ready, self._on_squid_pebble_ready)
-        self.framework.observe(self.on.config_changed, self._on_config_changed)
-#        self.framework.observe(self.on.fortune_action, self._on_fortune_action)
-        self.framework.observe(self.on.ingress_relation_joined, self._ingress_relation_joined)
+        self.framework.observe(
+            self.on.squid_pebble_ready,
+            self._on_squid_pebble_ready)
+        self.framework.observe(
+            self.on.cache_relation_changed,
+            self._cache_relation_changed)
         self._stored.set_default(things=[])
-        self.ingress = None
-        # XXX Remove self._advertise_ingress_info
-        self._advertise_ingress_info()
+        self.ingress = IngressRequires(
+            self,
+            self.get_ingress_config(),
+        )
 
-    def _update_files(self):
+    def get_cache_peers(self, relation):
+        cache_peers = []
+        if relation:
+            svc_name = relation.data[relation.app]["service-name"]
+            domain = "svc.cluster.local"
+            for peer in relation.units:
+                cache_peers.append(
+                    f"{peer.name}.{svc_name}-endpoints.{self.model.name}.{domain}")
+        return cache_peers
+
+    def render_config(self):
+        cache_relation = self.model.get_relation("cache")
+        port = cache_relation.data[cache_relation.app]["service-port"]
+        squid_template = SQUID_TEMPLATE + LISTEN_REVERSE_PROXY.format(
+            port=port)
+        for peer in self.get_cache_peers(cache_relation):
+            logger.info("Appending for {}".format(peer))
+            squid_template = squid_template + CACHE_PEER_LINE.format(
+                peer=peer,
+                port=port)
+        logger.info("Pushing new squid.conf")
+        logger.info(squid_template)
         container = self.unit.get_container("squid")
-        relation = self.model.get_relation("cache")
-        hostname = relation.data[relation.app]["service-hostname"]
-        svc_name = relation.data[relation.app]["service-name"]
-        port = relation.data[relation.app]["service-port"]
-        squid_template = SQUID_TEMPLATE + f"http_port {port} accel\n"
-        cache_peers = [u.name.replace('/', '-') for u in relation.units]
-        for peer in cache_peers:
-            peer_fqdn = f"{peer}.{svc_name}-endpoints.{self.model.name}.svc.cluster.local"
-            logger.error("Appending for {}".format(peer_fqdn))
-            squid_template = squid_template + f"cache_peer {peer_fqdn} parent {port} 0 no-query originserver"
-        logger.error("Pushing new squid.conf")
-        logger.error(squid_template)
-        container.push("/etc/squid/squid.conf", squid_template)
+        # XXX This try/except is to handle the fact that push is not
+        #     implemented in the test hareess yet.
+        try:
+            container.push("/etc/squid/squid.conf", squid_template)
+        except NotImplementedError:
+            logger.error("Could not push /etc/squid/squid.conf to container")
 
     def _on_squid_pebble_ready(self, event):
         """Define and start a workload using the Pebble API.
@@ -105,9 +129,15 @@ class SquidCacheCharm(CharmBase):
 
         Learn more about Pebble layers at https://github.com/canonical/pebble
         """
-        self._update_files()
+        if not self.cache_relation_ready():
+            event.defer()
+            self.unit.status = BlockedStatus(
+                'Cache relation missing or incomplete')
+            return
+        self.render_config()
         # Get a reference the container attribute on the PebbleReadyEvent
         container = event.workload
+        existing_plan = container.get_plan().to_dict()
         # Define an initial Pebble layer configuration
         pebble_layer = {
             "summary": "squid layer",
@@ -121,65 +151,52 @@ class SquidCacheCharm(CharmBase):
                 }
             },
         }
-        # Add intial Pebble config layer using the Pebble API
-        container.add_layer("squid", pebble_layer, combine=True)
-        # Autostart any services that were defined with startup: enabled
-        container.autostart()
-        # Learn more about statuses in the SDK docs:
-        # https://juju.is/docs/sdk/constructs#heading--statuses
-        self._advertise_ingress_info()
+        if existing_plan.get('services') != pebble_layer['services']:
+            # Add intial Pebble config layer using the Pebble API
+            container.add_layer("squid", pebble_layer, combine=True)
+            # Autostart any services that were defined with startup: enabled
+            container.autostart()
+            # Learn more about statuses in the SDK docs:
+            # https://juju.is/docs/sdk/constructs#heading--statuses
+            # self._advertise_ingress_info()
+        self.ingress.update_config(self.get_ingress_config())
+        self.unit.status = ActiveStatus()
 
-    def _advertise_ingress_info(self):
-        ingress_relation = self.model.get_relation("ingress")
+    def cache_relation_ready(self):
+        # XXX Surely an event should only be emitted by the reltion when it is
+        # ready.
         cache_relation = self.model.get_relation("cache")
-        if ingress_relation and cache_relation:
-            ingress_config = {
-                "service-hostname": cache_relation.data[cache_relation.app].get("service-hostname", "dummy"),
-                "service-name": self.app.name,
-                "service-port": cache_relation.data[cache_relation.app].get("service-port", "80"),
-            }
-            if self.ingress:
-                self.ingress.update_config(ingress_config)
-            else:
-                self.ingress = IngressRequires(
-                    self, 
-                    ingress_config,
-                )
+        if not cache_relation:
+            logger.info("Defering ingress event, cache relation missing")
+            return False
+        cache_relation_data = cache_relation.data[cache_relation.app]
+        if CACHE_REQUIRED_CONFIG.issubset(set(cache_relation_data.keys())):
+            logger.info("cache relation ready")
+            return True
+        else:
+            logger.info("Defering ingress event, cache relation incomplete")
+            return False
 
-    def _ingress_relation_joined(self, _):
-        self._advertise_ingress_info()
+    def get_ingress_config(self):
+        ingress_config = {
+            "service-hostname": self.app.name,
+            "service-name": self.app.name,
+            "service-port": 3128,
+        }
+        if self.cache_relation_ready():
+            cache_relation = self.model.get_relation("cache")
+            cache_relation_data = cache_relation.data[cache_relation.app]
+            ingress_config = {}
+            # Proxy ingress settings from cache client to ingress relation.
+            for field in REQUIRED_INGRESS_RELATION_FIELDS.union(
+                    OPTIONAL_INGRESS_RELATION_FIELDS):
+                if cache_relation_data.get(field):
+                    ingress_config[field] = cache_relation_data[field]
+            ingress_config['service-name'] = self.app.name
+        return ingress_config
 
-    def _on_config_changed(self, _):
-        """Just an example to show how to deal with changed configuration.
-
-        TEMPLATE-TODO: change this example to suit your needs.
-        If you don't need to handle config, you can remove this method,
-        the hook created in __init__.py for it, the corresponding test,
-        and the config.py file.
-
-        Learn more about config at https://juju.is/docs/sdk/config
-        """
-        self._advertise_ingress_info()
-#        current = self.config["thing"]
-#        if current not in self._stored.things:
-#            logger.debug("found a new thing: %r", current)
-#            self._stored.things.append(current)
-#
-#    def _on_fortune_action(self, event):
-#        """Just an example to show how to receive actions.
-#
-#        TEMPLATE-TODO: change this example to suit your needs.
-#        If you don't need to handle actions, you can remove this method,
-#        the hook created in __init__.py for it, the corresponding test,
-#        and the actions.py file.
-#
-#        Learn more about actions at https://juju.is/docs/sdk/actions
-#        """
-#        fail = event.params["fail"]
-#        if fail:
-#            event.fail(fail)
-#        else:
-#            event.set_results({"fortune": "A bug in the code is worth two in the documentation."})
+    def _cache_relation_changed(self, event):
+        self.ingress.update_config(self.get_ingress_config())
 
 
 if __name__ == "__main__":

@@ -1,0 +1,7 @@
+Second stand alonse squid charm
+breakout interface
+squid settings over interface
+
+Done
+proxy ingress settings over interface
+unit tests

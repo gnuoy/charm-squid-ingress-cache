@@ -2,7 +2,7 @@
 
 ## Description
 
-TODO: Describe your charm in a few paragraphs of Markdown
+Charmed ingress cache using [Squid][squid-upstream] operator for Kubernetes. 
 
 ## Usage
 
@@ -23,3 +23,7 @@ The Python operator framework includes a very nice harness for testing
 operator behaviour without full deployment. Just `run_tests`:
 
     ./run_tests
+
+<!-- LINKS -->
+[squid-upstream]: http://www.squid-cache.org/
+
