@@ -1,6 +1,6 @@
 # Copyright 2021 liam
 # See LICENSE file for licensing details.
-name: squid-cache
+name: squid-ingress-cache
 description: |
   TEMPLATE-TODO: fill out the charm's description
 summary: |

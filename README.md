@@ -1,4 +1,4 @@
-# squid-cache
+# squid-ingress-cache
 
 ## Description
 

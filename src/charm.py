@@ -70,7 +70,7 @@ LISTEN_REVERSE_PROXY = "http_port {port} accel"
 CACHE_PEER_LINE = "cache_peer {peer} parent {port} 0 no-query originserver"
 
 
-class SquidCacheCharm(CharmBase):
+class SquidIngressCacheCharm(CharmBase):
     """Charm the service."""
 
     _stored = StoredState()
@@ -200,4 +200,4 @@ class SquidCacheCharm(CharmBase):
 
 
 if __name__ == "__main__":
-    main(SquidCacheCharm)
+    main(SquidIngressCacheCharm)
