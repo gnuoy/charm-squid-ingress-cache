@@ -23,6 +23,14 @@ from charms.nginx_ingress_integrator.v0.ingress import (
     REQUIRED_INGRESS_RELATION_FIELDS,
     OPTIONAL_INGRESS_RELATION_FIELDS
 )
+from charms.squid_ingress_proxy.v0.ingress_proxy import (
+    IngressProxyProvides,
+)
+from charms.squid_ingress_cache.v0.ingress_cache import (
+    IngressCacheProvides,
+)
+# from ops.framework import EventBase, EventSource, Object
+# from ops.charm import CharmEvents
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +73,6 @@ refresh_pattern \/InRelease$ 0 0% 0 refresh-ims
 refresh_pattern \/(Translation-.*)(|\.bz2|\.gz|\.xz)$ 0 0% 0 refresh-ims
 refresh_pattern .		0	20%	4320
 """
-CACHE_REQUIRED_CONFIG = {'service-hostname', 'service-name', 'service-port'}
 LISTEN_REVERSE_PROXY = "http_port {port} accel"
 CACHE_PEER_LINE = "cache_peer {peer} parent {port} 0 no-query originserver"
 
@@ -77,34 +84,74 @@ class SquidIngressCacheCharm(CharmBase):
 
     def __init__(self, *args):
         super().__init__(*args)
-        self.framework.observe(
-            self.on.squid_pebble_ready,
-            self._on_squid_pebble_ready)
-        self.framework.observe(
-            self.on.ingress_proxy_relation_changed,
-            self._ingress_proxy_relation_changed)
-        self._stored.set_default(things=[])
+        self._stored.set_default(
+            squid_pebble_ready=False,
+        )
         self.ingress = IngressRequires(
             self,
             self.get_ingress_config(),
         )
+        self.ingress_proxy_provides = IngressProxyProvides(
+            self
+        )
+        self.ingress_cache_provides = IngressCacheProvides(
+            self
+        )
 
-    def get_cache_peers(self, relation):
-        cache_peers = []
-        if relation:
-            svc_name = relation.data[relation.app]["service-name"]
-            domain = "svc.cluster.local"
-            for peer in relation.units:
-                cache_peers.append(
-                    f"{peer.name}.{svc_name}-endpoints.{self.model.name}.{domain}")
-        return cache_peers
+        # Register event handlers.
+        self.framework.observe(
+            self.on.squid_pebble_ready,
+            self._squid_pebble_ready)
+        self.framework.observe(
+            self.on["ingress"].relation_changed,
+            self._ingress_available)
+        self.framework.observe(
+            self.on["ingress_proxy"].relation_changed,
+            self._ingress_proxy_available)
+        self.framework.observe(
+            self.on["ingress_cache"].relation_changed,
+            self._ingress_cache_available)
 
-    def render_config(self):
+    def _squid_pebble_ready(self, event):
+        self._stored.squid_pebble_ready = True
+        self._configure_charm(event)
+
+    def _ingress_proxy_available(self, event):
+        self._configure_charm(event)
+
+    def _ingress_cache_available(self, event):
+        self._configure_charm(event)
+
+    def _ingress_available(self, event):
+        self._configure_charm(event)
+
+    def _ingress_proxy_relation_ready(self):
+        ingress_proxy_relation = self.model.get_relation("ingress-proxy")
+        if not ingress_proxy_relation:
+            self.unit.status = BlockedStatus(
+                'Ingress proxy relation missing')
+            return False
+        if not self.ingress_proxy_provides.relation_ready():
+            self.unit.status = BlockedStatus(
+                'Ingress proxy relation incomplete')
+            return False
+        return True
+
+    def _configure_charm(self, event):
+        if not self._stored.squid_pebble_ready:
+            self.unit.status = BlockedStatus('Pebble not ready')
+            return
+        if not self._ingress_proxy_relation_ready():
+            return
+        self._render_config()
+        self._configure_pebble(event)
+
+    def _render_config(self):
         ingress_proxy_relation = self.model.get_relation("ingress-proxy")
         port = ingress_proxy_relation.data[ingress_proxy_relation.app]["service-port"]
         squid_template = SQUID_TEMPLATE + '\n' + LISTEN_REVERSE_PROXY.format(
             port=port)
-        for peer in self.get_cache_peers(ingress_proxy_relation):
+        for peer in self.ingress_proxy_provides.get_cache_peers():
             logger.info("Appending for {}".format(peer))
             squid_template = squid_template + '\n' + CACHE_PEER_LINE.format(
                 peer=peer,
@@ -119,22 +166,11 @@ class SquidIngressCacheCharm(CharmBase):
         except NotImplementedError:
             logger.error("Could not push /etc/squid/squid.conf to container")
 
-    def _on_squid_pebble_ready(self, event):
+    def _configure_pebble(self, event):
         """Define and start a workload using the Pebble API.
-
-        TEMPLATE-TODO: change this example to suit your needs.
-        You'll need to specify the right entrypoint and environment
-        configuration for your specific workload. Tip: you can see the
-        standard entrypoint of an existing container using docker inspect
 
         Learn more about Pebble layers at https://github.com/canonical/pebble
         """
-        if not self.ingress_proxy_relation_ready():
-            event.defer()
-            self.unit.status = BlockedStatus(
-                'Cache relation missing or incomplete')
-            return
-        self.render_config()
         # Get a reference the container attribute on the PebbleReadyEvent
         container = event.workload
         existing_plan = container.get_plan().to_dict()
@@ -162,28 +198,13 @@ class SquidIngressCacheCharm(CharmBase):
         self.ingress.update_config(self.get_ingress_config())
         self.unit.status = ActiveStatus()
 
-    def ingress_proxy_relation_ready(self):
-        # XXX Surely an event should only be emitted by the reltion when it is
-        # ready.
-        ingress_proxy_relation = self.model.get_relation("ingress-proxy")
-        if not ingress_proxy_relation:
-            logger.info("Defering ingress event, cache relation missing")
-            return False
-        ingress_proxy_relation_data = ingress_proxy_relation.data[ingress_proxy_relation.app]
-        if CACHE_REQUIRED_CONFIG.issubset(set(ingress_proxy_relation_data.keys())):
-            logger.info("cache relation ready")
-            return True
-        else:
-            logger.info("Defering ingress event, cache relation incomplete")
-            return False
-
     def get_ingress_config(self):
         ingress_config = {
             "service-hostname": self.app.name,
             "service-name": self.app.name,
             "service-port": 3128,
         }
-        if self.ingress_proxy_relation_ready():
+        if self._ingress_proxy_relation_ready():
             ingress_proxy_relation = self.model.get_relation("ingress-proxy")
             ingress_proxy_relation_data = ingress_proxy_relation.data[ingress_proxy_relation.app]
             ingress_config = {}
