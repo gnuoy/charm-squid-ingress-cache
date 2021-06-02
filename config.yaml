@@ -1,3 +1,8 @@
 # Copyright 2021 Canonical
 # See LICENSE file for licensing details.
-{}
+options:
+  log_format:
+    type: string
+    default: '%>a %ui %un [%tl] "%rm %ru HTTP/%rv" %>Hs %<st "%{Referer}>h" "%{User-Agent}>h" %Ss:%Sh'
+    description: |
+      Format of the squid log.

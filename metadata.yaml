@@ -6,6 +6,7 @@ description: |
   reusing frequently-requested web pages. 
 summary: |
   Squid is a caching proxy for the Web supporting HTTP, HTTPS, FTP, and more. 
+docs: https://discourse.charmhub.io/t/squid-ingress-cache-docs-index/4664
 
 containers:
   squid:
