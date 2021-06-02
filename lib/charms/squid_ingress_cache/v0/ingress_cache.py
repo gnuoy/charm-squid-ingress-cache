@@ -19,6 +19,23 @@ from ops.charm import CharmEvents
 
 logger = logging.getLogger(__name__)
 
+REQUIRED_INGRESS_RELATION_FIELDS = {
+    "service-hostname",
+    "service-name",
+    "service-port",
+}
+
+OPTIONAL_INGRESS_RELATION_FIELDS = {
+    "limit-rps",
+    "limit-whitelist",
+    "max-body-size",
+    "retry-errors",
+    "service-namespace",
+    "session-cookie-max-age",
+    "tls-secret-name",
+    "path-routes",
+}
+
 
 class IngressCacheAvailableEvent(EventBase):
     pass
@@ -36,6 +53,7 @@ class IngressCacheProvides(Object):
         - relation-changed
     """
     CACHE_REQUIRED_CONFIG = {'service-hostname', 'service-name', 'service-port'}
+    on = IngressCacheCharmEvents()
 
     def __init__(self, charm):
         super().__init__(charm, "ingress_cache")
@@ -46,16 +64,42 @@ class IngressCacheProvides(Object):
             self._on_relation_changed)
         self.charm = charm
 
-    def relation_ready(self):
+    def get_relation(self):
         try:
-            relation = self.model.get_relation("ingress-cache")
+            return self.model.get_relation("ingress-cache")
         except KeyError:
-            return False
+            return
+
+    def get_complete_relation(self):
+        relation = self.get_relation()
         if relation and self.CACHE_REQUIRED_CONFIG.issubset(
                 set(relation.data[relation.app].keys())):
-            return True
+            return relation
         else:
-            return False
+            return None
+
+    def get_relation_data_subset(self, keys):
+        ingress_config = {}
+        relation = self.get_complete_relation()
+        if relation:
+            ingress_proxy_relation_data = relation.data[relation.app]
+            # Proxy ingress settings from cache client to ingress relation.
+            for field in keys:
+                if ingress_proxy_relation_data.get(field):
+                    ingress_config[field] = ingress_proxy_relation_data[field]
+        return ingress_config
+
+    def get_ingress_data(self):
+        ingress_config = self.get_relation_data_subset(
+            REQUIRED_INGRESS_RELATION_FIELDS.union(
+                OPTIONAL_INGRESS_RELATION_FIELDS))
+        if ingress_config:
+            ingress_config['service-name'] = self.model.app.name
+        return ingress_config
+
+    def get_cache_data(self):
+        ingress_config = self.get_relation_data_subset(['refresh-patterns'])
+        return ingress_config
 
     def _on_relation_changed(self, event):
         """Handle a change to the ingress relation.
@@ -69,7 +113,8 @@ class IngressCacheProvides(Object):
         # configure the ingress.
         if self.relation_ready():
             logger.info("cache relation ready")
-            self.charm.on.ingress_cache_available.emit()
+            self.on.ingress_cache_available.relation_event = event
+            self.on.ingress_cache_available.emit()
         else:
             logger.error("Cache relation incomplete")
 

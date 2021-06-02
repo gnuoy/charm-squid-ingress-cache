@@ -20,8 +20,6 @@ from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus
 from charms.nginx_ingress_integrator.v0.ingress import (
     IngressRequires,
-    REQUIRED_INGRESS_RELATION_FIELDS,
-    OPTIONAL_INGRESS_RELATION_FIELDS
 )
 from charms.squid_ingress_proxy.v0.ingress_proxy import (
     IngressProxyProvides,
@@ -29,6 +27,8 @@ from charms.squid_ingress_proxy.v0.ingress_proxy import (
 from charms.squid_ingress_cache.v0.ingress_cache import (
     IngressCacheProvides,
 )
+import jinja2
+
 # from ops.framework import EventBase, EventSource, Object
 # from ops.charm import CharmEvents
 
@@ -64,17 +64,25 @@ http_access allow localhost
 http_access allow localnet
 http_access deny all
 coredump_dir /var/spool/squid
-refresh_pattern ^ftp:		1440	20%	10080
-refresh_pattern ^gopher:	1440	0%	1440
-refresh_pattern -i (/cgi-bin/|\?) 0	0%	0
-refresh_pattern \/(Packages|Sources)(|\.bz2|\.gz|\.xz)$ 0 0% 0 refresh-ims
-refresh_pattern \/Release(|\.gpg)$ 0 0% 0 refresh-ims
-refresh_pattern \/InRelease$ 0 0% 0 refresh-ims
-refresh_pattern \/(Translation-.*)(|\.bz2|\.gz|\.xz)$ 0 0% 0 refresh-ims
-refresh_pattern .		0	20%	4320
+{% if refresh_patterns -%}
+{% for refresh_pattern in refresh_patterns -%}
+{% if refresh_pattern.case_sensitive -%}
+refresh_pattern -i {{ refresh_pattern.regex }} {{ refresh_pattern.min }} {{ refresh_pattern.percent }}% {{ refresh_pattern.max }} {{ refresh_pattern.options|join(' ') }}
+{% else %}
+refresh_pattern {{ refresh_pattern.regex }} {{ refresh_pattern.min }} {{ refresh_pattern.percent }}% {{ refresh_pattern.max }} {{ refresh_pattern.options|join(' ') }}
+{% endif %}
+{% endfor -%}
+{% endif %}
+refresh_pattern . 0 20% 4320
+{% if port %}
+http_port {{ port }} accel
+{% for peer in peers -%}
+cache_peer {{ peer }} parent {{ port }} 0 no-query originserver
+{% endfor -%}
+{% endif %}
+
 """
-LISTEN_REVERSE_PROXY = "http_port {port} accel"
-CACHE_PEER_LINE = "cache_peer {peer} parent {port} 0 no-query originserver"
+# CACHE_PEER_LINE = "cache_peer {peer} parent {port} 0 no-query originserver"
 
 
 class SquidIngressCacheCharm(CharmBase):
@@ -87,15 +95,15 @@ class SquidIngressCacheCharm(CharmBase):
         self._stored.set_default(
             squid_pebble_ready=False,
         )
-        self.ingress = IngressRequires(
-            self,
-            self.get_ingress_config(),
-        )
         self.ingress_proxy_provides = IngressProxyProvides(
             self
         )
         self.ingress_cache_provides = IngressCacheProvides(
             self
+        )
+        self.ingress = IngressRequires(
+            self,
+            self._get_ingress_config(),
         )
 
         # Register event handlers.
@@ -126,12 +134,12 @@ class SquidIngressCacheCharm(CharmBase):
         self._configure_charm(event)
 
     def _ingress_proxy_relation_ready(self):
-        ingress_proxy_relation = self.model.get_relation("ingress-proxy")
+        ingress_proxy_relation = self.ingress_proxy_provides.get_relation()
         if not ingress_proxy_relation:
             self.unit.status = BlockedStatus(
                 'Ingress proxy relation missing')
             return False
-        if not self.ingress_proxy_provides.relation_ready():
+        if not self.ingress_proxy_provides.get_complete_relation():
             self.unit.status = BlockedStatus(
                 'Ingress proxy relation incomplete')
             return False
@@ -145,24 +153,30 @@ class SquidIngressCacheCharm(CharmBase):
             return
         self._render_config()
         self._configure_pebble(event)
+        self.ingress.update_config(self._get_ingress_config())
+        self.unit.status = ActiveStatus()
+
+    def _get_squid_config(self):
+        jinja_env = jinja2.Environment(loader=jinja2.BaseLoader())
+        jinja_template = jinja_env.from_string(SQUID_TEMPLATE)
+        ingress_config = self._get_ingress_config()
+        squid_config = self._get_squid_config_from_relation()
+        ctxt = {
+            'port': ingress_config['service-port'],
+            'peers': self._get_cache_peers()}
+        ctxt.update(squid_config)
+        ctxt = {k.replace('-', '_'): v for k, v in ctxt.items()}
+        return jinja_template.render(**ctxt)
 
     def _render_config(self):
-        ingress_proxy_relation = self.model.get_relation("ingress-proxy")
-        port = ingress_proxy_relation.data[ingress_proxy_relation.app]["service-port"]
-        squid_template = SQUID_TEMPLATE + '\n' + LISTEN_REVERSE_PROXY.format(
-            port=port)
-        for peer in self.ingress_proxy_provides.get_cache_peers():
-            logger.info("Appending for {}".format(peer))
-            squid_template = squid_template + '\n' + CACHE_PEER_LINE.format(
-                peer=peer,
-                port=port)
+        squid_config = self._get_squid_config()
         logger.info("Pushing new squid.conf")
-        logger.info(squid_template)
+        logger.info(squid_config)
         container = self.unit.get_container("squid")
         # XXX This try/except is to handle the fact that push is not
         #     implemented in the test hareess yet.
         try:
-            container.push("/etc/squid/squid.conf", squid_template)
+            container.push("/etc/squid/squid.conf", squid_config)
         except NotImplementedError:
             logger.error("Could not push /etc/squid/squid.conf to container")
 
@@ -172,7 +186,7 @@ class SquidIngressCacheCharm(CharmBase):
         Learn more about Pebble layers at https://github.com/canonical/pebble
         """
         # Get a reference the container attribute on the PebbleReadyEvent
-        container = event.workload
+        container = self.unit.get_container("squid")
         existing_plan = container.get_plan().to_dict()
         # Define an initial Pebble layer configuration
         pebble_layer = {
@@ -195,29 +209,43 @@ class SquidIngressCacheCharm(CharmBase):
             # Learn more about statuses in the SDK docs:
             # https://juju.is/docs/sdk/constructs#heading--statuses
             # self._advertise_ingress_info()
-        self.ingress.update_config(self.get_ingress_config())
-        self.unit.status = ActiveStatus()
 
-    def get_ingress_config(self):
-        ingress_config = {
+    def _client_relation(self):
+        if self.ingress_proxy_provides.get_complete_relation():
+            return self.ingress_proxy_provides
+        if self.ingress_cache_provides.get_complete_relation():
+            return self.ingress_cache_provides
+
+    def _get_ingress_config(self):
+        default_ingress_config = {
             "service-hostname": self.app.name,
             "service-name": self.app.name,
             "service-port": 3128,
         }
-        if self._ingress_proxy_relation_ready():
-            ingress_proxy_relation = self.model.get_relation("ingress-proxy")
-            ingress_proxy_relation_data = ingress_proxy_relation.data[ingress_proxy_relation.app]
-            ingress_config = {}
-            # Proxy ingress settings from cache client to ingress relation.
-            for field in REQUIRED_INGRESS_RELATION_FIELDS.union(
-                    OPTIONAL_INGRESS_RELATION_FIELDS):
-                if ingress_proxy_relation_data.get(field):
-                    ingress_config[field] = ingress_proxy_relation_data[field]
-            ingress_config['service-name'] = self.app.name
-        return ingress_config
+        relation = self._client_relation()
+        if relation:
+            return relation.get_ingress_data()
+        else:
+            return default_ingress_config
+
+    def _get_squid_config_from_relation(self):
+        if self.ingress_cache_provides.get_complete_relation():
+            relation = self._client_relation()
+            return relation.get_cache_data()
+        return {}
 
     def _ingress_proxy_relation_changed(self, event):
         self.ingress.update_config(self.get_ingress_config())
+
+    def _get_cache_peers(self, domain="svc.cluster.local"):
+        relation = self._client_relation().get_relation()
+        cache_peers = []
+        svc_name = relation.data[relation.app]["service-name"]
+        for peer in relation.units:
+            unit_name = peer.name.replace('/', '-')
+            cache_peers.append(
+                f"{unit_name}.{svc_name}-endpoints.{self.model.name}.{domain}")
+        return cache_peers
 
 
 if __name__ == "__main__":
