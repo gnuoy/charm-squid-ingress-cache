@@ -1,15 +1,11 @@
-# Copyright 2021 liam
+# Copyright 2021 Canonical
 # See LICENSE file for licensing details.
 name: squid-ingress-cache
 description: |
-  TEMPLATE-TODO: fill out the charm's description
+  Add a cache in front of an application improves response times by caching and
+  reusing frequently-requested web pages. 
 summary: |
-  TEMPLATE-TODO: fill out the charm's summary
-
-resources:
-  httpbin-image:
-    type: oci-image
-    description: OCI image for httpbin (kennethreitz/httpbin)
+  Squid is a caching proxy for the Web supporting HTTP, HTTPS, FTP, and more. 
 
 containers:
   squid:

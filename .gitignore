@@ -1,6 +1,7 @@
 venv/
 build/
 *.charm
+squid.tar
 
 .coverage
 __pycache__/

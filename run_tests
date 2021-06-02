@@ -1,5 +1,5 @@
 #!/bin/sh -e
-# Copyright 2021 liam
+# Copyright 2021 Canoncial
 # See LICENSE file for licensing details.
 
 if [ -z "$VIRTUAL_ENV" -a -d venv/ ]; then
@@ -12,6 +12,6 @@ else
     export PYTHONPATH="lib:src:$PYTHONPATH"
 fi
 
-# flake8 --ignore=W605
+flake8 --ignore=W605
 coverage run --source=src -m unittest -v "$@"
 coverage report -m

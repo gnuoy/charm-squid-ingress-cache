@@ -17,6 +17,11 @@ Create and activate a virtualenv with the development requirements:
     source venv/bin/activate
     pip install -r requirements-dev.txt
 
+Building docker image:
+
+    docker image build -t squid docker
+    docker image save -o squid.tar <image name>
+
 ## Testing
 
 The Python operator framework includes a very nice harness for testing

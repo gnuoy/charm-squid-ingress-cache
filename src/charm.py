@@ -21,10 +21,14 @@ from ops.model import ActiveStatus, BlockedStatus
 from charms.nginx_ingress_integrator.v0.ingress import (
     IngressRequires,
 )
-from charms.squid_ingress_proxy.v0.ingress_proxy import (
+# from charms.squid_ingress_proxy.v0.ingress_proxy import (
+#     IngressProxyProvides,
+# )
+# from charms.squid_ingress_cache.v0.ingress_cache import (
+#     IngressCacheProvides,
+# )
+from charms.squid_ingress.v0.ingress import (
     IngressProxyProvides,
-)
-from charms.squid_ingress_cache.v0.ingress_cache import (
     IngressCacheProvides,
 )
 import jinja2
