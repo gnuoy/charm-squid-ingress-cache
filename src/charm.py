@@ -12,6 +12,7 @@ develop a new k8s charm using the Operator Framework:
     https://discourse.charmhub.io/t/4208
 """
 
+import jinja2
 import logging
 
 from ops.charm import CharmBase
@@ -21,20 +22,10 @@ from ops.model import ActiveStatus, BlockedStatus
 from charms.nginx_ingress_integrator.v0.ingress import (
     IngressRequires,
 )
-# from charms.squid_ingress_proxy.v0.ingress_proxy import (
-#     IngressProxyProvides,
-# )
-# from charms.squid_ingress_cache.v0.ingress_cache import (
-#     IngressCacheProvides,
-# )
 from charms.squid_ingress.v0.ingress import (
     IngressProxyProvides,
     IngressCacheProvides,
 )
-import jinja2
-
-# from ops.framework import EventBase, EventSource, Object
-# from ops.charm import CharmEvents
 
 logger = logging.getLogger(__name__)
 
@@ -72,11 +63,11 @@ coredump_dir /var/spool/squid
 {% for refresh_pattern in refresh_patterns -%}
 {% if refresh_pattern.case_sensitive -%}
 refresh_pattern -i {{ refresh_pattern.regex }} {{ refresh_pattern.min }} {{ refresh_pattern.percent }}% {{ refresh_pattern.max }} {{ refresh_pattern.options|join(' ') }}
-{% else %}
+{% else -%}
 refresh_pattern {{ refresh_pattern.regex }} {{ refresh_pattern.min }} {{ refresh_pattern.percent }}% {{ refresh_pattern.max }} {{ refresh_pattern.options|join(' ') }}
-{% endif %}
+{% endif -%}
 {% endfor -%}
-{% endif %}
+{% endif -%}
 refresh_pattern . 0 20% 4320
 {% if port %}
 http_port {{ port }} accel
@@ -85,8 +76,7 @@ cache_peer {{ peer }} parent {{ port }} 0 no-query originserver
 {% endfor -%}
 {% endif %}
 
-"""
-# CACHE_PEER_LINE = "cache_peer {peer} parent {port} 0 no-query originserver"
+""" # noqa
 
 
 class SquidIngressCacheCharm(CharmBase):

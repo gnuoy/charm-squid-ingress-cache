@@ -82,7 +82,6 @@ class IngressBaseProvides(Object):
             ingress_config['service-name'] = self.model.app.name
         return ingress_config
 
-
     def _on_relation_changed(self, event):
         """Handle a change to the ingress relation.
 
@@ -108,8 +107,10 @@ class IngressBaseProvides(Object):
                     f"{peer.name}.{svc_name}-endpoints.{self.model.name}.{domain}")
         return cache_peers
 
+
 class IngressProxyAvailableEvent(EventBase):
     pass
+
 
 class IngressCacheProvides(IngressBaseProvides):
     """This class defines the functionality for the 'provides' side of the 'ingress' relation.
@@ -137,7 +138,6 @@ class IngressCacheProvides(IngressBaseProvides):
     def get_cache_data(self):
         ingress_config = self.get_relation_data_subset(['refresh-patterns'])
         return ingress_config
-
 
 
 class IngressProxyCharmEvents(CharmEvents):

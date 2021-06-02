@@ -28,13 +28,12 @@ http_access allow localhost
 http_access allow localnet
 http_access deny all
 coredump_dir /var/spool/squid
-
 refresh_pattern . 0 20% 4320
 
 http_port 80 accel
 cache_peer squid-0.website-endpoints.None.svc.cluster.local parent 80 0 no-query originserver
 
-"""
+""" # noqa
 SQUID_CONFIG2 = """
 acl localnet src 0.0.0.1-0.255.255.255	# RFC 1122 "this" network (LAN)
 acl localnet src 10.0.0.0/8		# RFC 1918 local private network (LAN)
@@ -65,15 +64,11 @@ http_access allow localhost
 http_access allow localnet
 http_access deny all
 coredump_dir /var/spool/squid
-
 refresh_pattern ^ftp: 1440 20% 10080 override-expire
-
 refresh_pattern -i (/cgi-bin/|\?) 0 0% 0 
-
-
 refresh_pattern . 0 20% 4320
 
 http_port 80 accel
 cache_peer squid-0.website-endpoints.None.svc.cluster.local parent 80 0 no-query originserver
 
-"""
+""" # noqa
