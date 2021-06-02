@@ -111,7 +111,7 @@ class IngressCacheProvides(Object):
 
         # Create an event that our charm can use to decide it's okay to
         # configure the ingress.
-        if self.relation_ready():
+        if self.get_complete_relation():
             logger.info("cache relation ready")
             self.on.ingress_cache_available.relation_event = event
             self.on.ingress_cache_available.emit()
