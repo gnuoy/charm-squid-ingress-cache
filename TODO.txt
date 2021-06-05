@@ -1,3 +1,7 @@
+Documentaion deploy and scale
+Documentation developer
+Publish lib
+Push charm
 Second stand alonse squid charm
 
 Done

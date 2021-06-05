@@ -22,8 +22,6 @@ requires:
     interface: ingress
 
 provides:
-  ingress-cache:
-    interface: ingress-cache
   ingress-proxy:
     interface: ingress
 

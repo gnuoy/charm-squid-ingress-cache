@@ -43,6 +43,7 @@ requires:
 ```
 """
 
+import json
 import logging
 
 from ops.charm import CharmEvents
@@ -76,6 +77,13 @@ OPTIONAL_INGRESS_RELATION_FIELDS = {
     "session-cookie-max-age",
     "tls-secret-name",
     "path-routes",
+    "cache-settings",
+}
+OPTIONAL_CACHE_SETTING_RELATION_FIELDS = {
+    "refresh-patterns",
+}
+JSON_RELATION_FIELDS = {
+    "cache-settings"
 }
 
 
@@ -111,6 +119,10 @@ class IngressRequires(Object):
             for x in self.config_dict
             if x not in REQUIRED_INGRESS_RELATION_FIELDS | OPTIONAL_INGRESS_RELATION_FIELDS
         ]
+        unknown.extend([
+            x
+            for x in self.config_dict.get('cache-settings', [])
+            if x not in OPTIONAL_CACHE_SETTING_RELATION_FIELDS])
         if unknown:
             logger.error(
                 "Ingress relation error, unknown key(s) in config dictionary found: %s",
@@ -136,7 +148,10 @@ class IngressRequires(Object):
             if self._config_dict_errors():
                 return
             for key in self.config_dict:
-                event.relation.data[self.model.app][key] = str(self.config_dict[key])
+                if key in JSON_RELATION_FIELDS:
+                    event.relation.data[self.model.app][key] = json.dumps(self.config_dict[key])
+                else:
+                    event.relation.data[self.model.app][key] = str(self.config_dict[key])
 
     def update_config(self, config_dict):
         """Allow for updates to relation."""

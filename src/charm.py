@@ -13,6 +13,7 @@ develop a new k8s charm using the Operator Framework:
 """
 
 import jinja2
+import json
 import logging
 
 from ops.charm import CharmBase
@@ -21,11 +22,15 @@ from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus
 from charms.nginx_ingress_integrator.v0.ingress import (
     IngressRequires,
+    IngressProvides,
+    REQUIRED_INGRESS_RELATION_FIELDS,
+    OPTIONAL_INGRESS_RELATION_FIELDS,
+    IngressCharmEvents,
 )
-from charms.squid_ingress.v0.ingress import (
-    IngressProxyProvides,
-    IngressCacheProvides,
-)
+# from charms.squid_ingress.v0.ingress import (
+#    IngressProxyProvides,
+#    IngressCacheProvides,
+# )
 
 logger = logging.getLogger(__name__)
 
@@ -83,36 +88,50 @@ class SquidIngressCacheCharm(CharmBase):
     """Charm the service."""
 
     _stored = StoredState()
+    on = IngressCharmEvents()
 
     def __init__(self, *args):
         super().__init__(*args)
         self._stored.set_default(
             squid_pebble_ready=False,
         )
-        self.ingress_proxy_provides = IngressProxyProvides(
+        self.ingress_proxy_provides = IngressProvides(
             self
         )
-        self.ingress_cache_provides = IngressCacheProvides(
-            self
-        )
+#        self.ingress_cache_provides = IngressProvides(
+#            self
+#        )
         self.ingress = IngressRequires(
             self,
             self._get_ingress_config(),
         )
-
+        self.framework.observe(self.on.ingress_available, self._ingress_proxy_available)
         # Register event handlers.
         self.framework.observe(
             self.on.squid_pebble_ready,
             self._squid_pebble_ready)
-        self.framework.observe(
-            self.on["ingress"].relation_changed,
-            self._ingress_available)
-        self.framework.observe(
-            self.on["ingress_proxy"].relation_changed,
-            self._ingress_proxy_available)
-        self.framework.observe(
-            self.on["ingress_cache"].relation_changed,
-            self._ingress_cache_available)
+#        self.framework.observe(
+#            self.on["ingress"].relation_changed,
+#            self._ingress_available)
+#        self.framework.observe(
+#            self.on["ingress_proxy"].relation_changed,
+#            self._ingress_proxy_available)
+#        self.framework.observe(
+#            self.on["ingress_cache"].relation_changed,
+#            self._ingress_cache_available)
+
+    def get_complete_relation(self, relation_name, required_keys):
+        relation = self.model.get_relation(relation_name)
+        if relation and set(required_keys).issubset(
+                set(relation.data[relation.app].keys())):
+            return relation
+        else:
+            return None
+
+    def get_ingress_proxy_relation(self):
+        return self.get_complete_relation(
+            'ingress-proxy',
+            REQUIRED_INGRESS_RELATION_FIELDS)
 
     def _squid_pebble_ready(self, event):
         self._stored.squid_pebble_ready = True
@@ -128,14 +147,10 @@ class SquidIngressCacheCharm(CharmBase):
         self._configure_charm(event)
 
     def _ingress_proxy_relation_ready(self):
-        ingress_proxy_relation = self.ingress_proxy_provides.get_relation()
+        ingress_proxy_relation = self.get_ingress_proxy_relation()
         if not ingress_proxy_relation:
             self.unit.status = BlockedStatus(
-                'Ingress proxy relation missing')
-            return False
-        if not self.ingress_proxy_provides.get_complete_relation():
-            self.unit.status = BlockedStatus(
-                'Ingress proxy relation incomplete')
+                'Ingress proxy relation missing or incomplete')
             return False
         return True
 
@@ -204,11 +219,11 @@ class SquidIngressCacheCharm(CharmBase):
             # https://juju.is/docs/sdk/constructs#heading--statuses
             # self._advertise_ingress_info()
 
-    def _client_relation(self):
-        if self.ingress_proxy_provides.get_complete_relation():
-            return self.ingress_proxy_provides
-        if self.ingress_cache_provides.get_complete_relation():
-            return self.ingress_cache_provides
+#    def _client_relation(self):
+#        if self.ingress_proxy_provides.get_complete_relation():
+#            return self.ingress_proxy_provides
+#        if self.ingress_cache_provides.get_complete_relation():
+#            return self.ingress_cache_provides
 
     def _get_ingress_config(self):
         default_ingress_config = {
@@ -216,23 +231,43 @@ class SquidIngressCacheCharm(CharmBase):
             "service-name": self.app.name,
             "service-port": 3128,
         }
-        relation = self._client_relation()
+        relation = self.get_ingress_proxy_relation()
         if relation:
-            return relation.get_ingress_data()
+            return self._get_ingress_data()
         else:
             return default_ingress_config
 
+    def _get_data_from_relation(self, relation_name, keys):
+        relation = self.model.get_relation(relation_name)
+        if relation:
+            # print(relation.data[relation.app].keys())
+            return {k: relation.data[relation.app].get(k)
+                    for k in keys
+                    if relation.data[relation.app].get(k)}
+        else:
+            return {}
+
+    def _get_ingress_data(self):
+        ingress_data = self._get_data_from_relation(
+            'ingress-proxy',
+            REQUIRED_INGRESS_RELATION_FIELDS | OPTIONAL_INGRESS_RELATION_FIELDS)
+        ingress_data['service-name'] = self.app.name
+        ingress_data.pop('cache-settings', None)
+        return ingress_data
+
     def _get_squid_config_from_relation(self):
-        if self.ingress_cache_provides.get_complete_relation():
-            relation = self._client_relation()
-            return relation.get_cache_data()
+        squid_config_from_relation = self._get_data_from_relation(
+            'ingress-proxy',
+            ['cache-settings'])
+        if squid_config_from_relation:
+            return json.loads(squid_config_from_relation.get('cache-settings'))
         return {}
 
     def _ingress_proxy_relation_changed(self, event):
         self.ingress.update_config(self.get_ingress_config())
 
     def _get_cache_peers(self, domain="svc.cluster.local"):
-        relation = self._client_relation().get_relation()
+        relation = self.get_ingress_proxy_relation()
         cache_peers = []
         svc_name = relation.data[relation.app]["service-name"]
         for peer in relation.units:
