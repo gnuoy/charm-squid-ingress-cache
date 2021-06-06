@@ -1,12 +1,2 @@
-Documentaion deploy and scale
-Documentation developer
-Publish lib
-Push charm
-Second stand alonse squid charm
-
-Done
-proxy ingress settings over interface
-unit tests
-breakout interface
-squid settings over interface
-test scale-out
+Support SSL
+Config based Standalone charm.

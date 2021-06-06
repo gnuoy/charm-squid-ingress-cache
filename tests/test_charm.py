@@ -1,10 +1,11 @@
-# Copyright 2021 liam
+# Copyright 2021 Canoncial
 # See LICENSE file for licensing details.
 #
 # Learn more about testing at: https://juju.is/docs/sdk/testing
 
 import unittest
 # from unittest.mock import Mock
+import json
 
 from charm import SquidIngressCacheCharm
 from ops.model import ActiveStatus
@@ -19,29 +20,22 @@ class TestCharm(unittest.TestCase):
         self.addCleanup(self.harness.cleanup)
         self.harness.begin()
 
-#    def test_config_changed(self):
-#        self.assertEqual(list(self.harness.charm._stored.things), [])
-#        self.harness.update_config({"thing": "foo"})
-#        self.assertEqual(list(self.harness.charm._stored.things), ["foo"])
-
-#    def test_action(self):
-#        # the harness doesn't (yet!) help much with actions themselves
-#        action_event = Mock(params={"fail": ""})
-#        self.harness.charm._on_fortune_action(action_event)
-#
-#        self.assertTrue(action_event.set_results.called)
-#
-#    def test_action_fail(self):
-#        action_event = Mock(params={"fail": "fail this"})
-#        self.harness.charm._on_fortune_action(action_event)
-#
-#        self.assertEqual(action_event.fail.call_args, [("fail this",)])
-
-    def add_ingress_proxy_relation(self, cache_data=None):
-        rel_id = self.harness.add_relation('ingress-proxy', 'squid-0')
+    def add_ingress_relation(self, cache_data=None):
+        rel_id = self.harness.add_relation(
+            'ingress',
+            'nginx-ingress-controller')
         self.harness.add_relation_unit(
             rel_id,
-            'squid-0')
+            'nginx-ingress-controller/0')
+        return rel_id
+
+    def add_ingress_proxy_relation(self, cache_data=None):
+        rel_id = self.harness.add_relation(
+            'ingress-proxy',
+            'mywebsite')
+        self.harness.add_relation_unit(
+            rel_id,
+            'mywebsite/0')
         relation_data = {
             'service-hostname': 'mydomain.external.com',
             'service-name': 'website',
@@ -51,7 +45,7 @@ class TestCharm(unittest.TestCase):
             relation_data['cache-settings'] = cache_data
         self.harness.update_relation_data(
             rel_id,
-            'squid-0',
+            'mywebsite',
             relation_data)
         return rel_id
 
@@ -73,45 +67,15 @@ class TestCharm(unittest.TestCase):
                     'max': 0,
                     'options': []}]}
         self.add_ingress_proxy_relation(
-            cache_data=cache_relation_data)
+            cache_data=json.dumps(cache_relation_data))
 
-#    def add_ingress_cache_relation(self):
-#        rel_id = self.harness.add_relation('ingress-cache', 'squid')
-#        self.harness.add_relation_unit(
-#            rel_id,
-#            'squid-0')
-#        self.harness.update_relation_data(
-#            rel_id,
-#            'squid-0',
-#            {
-#                'service-hostname': 'mydomain.external.com',
-#                'service-name': 'website',
-#                'service-port': 80,
-#                'limit-rps': 12,
-#                'refresh-patterns': [
-#                    {
-#                        'case_sensitive': False,
-#                        'regex': '^ftp:',
-#                        'min': 1440,
-#                        'percent': 20,
-#                        'max': 10080,
-#                        'options': ['override-expire']},
-#                    {
-#                        'case_sensitive': True,
-#                        'regex': '(/cgi-bin/|\?)',
-#                        'min': 0,
-#                        'percent': 0,
-#                        'max': 0,
-#                        'options': []}]})
-#        return rel_id
+    def test__get_cache_peers(self):
+        self.add_ingress_proxy_relation()
+        # self.model.name is None in test harness.
+        self.assertEqual(
+            self.harness.charm._get_cache_peers(),
+            ['mywebsite-0.website-endpoints.None.svc.cluster.local'])
 
-#    def test_get_cache_peers(self):
-#        self.add_ingress_proxy_relation()
-#        # self.model.name is None in test harness.
-#        self.assertEqual(
-#            self.harness.charm.get_cache_peers(
-#                self.harness.model.get_relation("ingress-proxy")),
-#            ['squid-ingress-cache.website-endpoints.None.svc.cluster.local'])
     def test_httpbin_pebble_ready(self):
         # Check the initial Pebble plan is empty
         initial_plan = self.harness.get_container_pebble_plan("squid")
@@ -142,35 +106,6 @@ class TestCharm(unittest.TestCase):
         # Ensure we set an ActiveStatus with no message
         self.assertEqual(self.harness.model.unit.status, ActiveStatus())
 
-#    def test_ingress_proxy_relation_ready(self):
-#        # Check False when there is no cache relation.
-#        self.assertFalse(self.harness.charm.ingress_proxy_relation_ready())
-#        rel_id = self.harness.add_relation('ingress-proxy', 'squid-ingress-cache')
-#        # Check False with a cache relation but no relation data.
-#        self.assertFalse(self.harness.charm.ingress_proxy_relation_ready())
-#        self.harness.add_relation_unit(
-#            rel_id,
-#            'squid-ingress-cache')
-#        self.harness.update_relation_data(
-#            rel_id,
-#            'squid-ingress-cache',
-#            {
-#                'service-name': 'website',
-#                'service-port': 80,
-#            })
-#        # Check False with a cache relation but incomplete relation data.
-#        self.assertFalse(self.harness.charm.ingress_proxy_relation_ready())
-#        self.harness.update_relation_data(
-#            rel_id,
-#            'squid-ingress-cache',
-#            {
-#                'service-hostname': 'mydomain.external.com',
-#                'service-name': 'website',
-#                'service-port': 80,
-#            })
-#        # Check True with a cache relation and all relation data.
-#        self.assertTrue(self.harness.charm.ingress_proxy_relation_ready())
-
     def test__get_ingress_config_proxy(self):
         self.assertEqual(
             self.harness.charm._get_ingress_config(),
@@ -187,21 +122,21 @@ class TestCharm(unittest.TestCase):
                 'limit-rps': 12,
                 'service-port': 80})
 
-#    def test__get_ingress_config_cache(self):
-#        self.assertEqual(
-#            self.harness.charm._get_ingress_config(),
-#            {
-#                'service-hostname': 'squid-ingress-cache',
-#                'service-name': 'squid-ingress-cache',
-#                'service-port': 3128})
-#        self.add_ingress_cache_relation()
-#        self.assertEqual(
-#            self.harness.charm._get_ingress_config(),
-#            {
-#                'service-hostname': 'mydomain.external.com',
-#                'service-name': 'squid-ingress-cache',
-#                'limit-rps': 12,
-#                'service-port': 80})
+    def test__get_ingress_config_cache(self):
+        self.assertEqual(
+            self.harness.charm._get_ingress_config(),
+            {
+                'service-hostname': 'squid-ingress-cache',
+                'service-name': 'squid-ingress-cache',
+                'service-port': 3128})
+        self.add_ingress_cache_relation()
+        self.assertEqual(
+            self.harness.charm._get_ingress_config(),
+            {
+                'service-hostname': 'mydomain.external.com',
+                'service-name': 'squid-ingress-cache',
+                'limit-rps': 12,
+                'service-port': 80})
 
     def test__get_squid_config_proxy(self):
         self.add_ingress_proxy_relation()
@@ -209,12 +144,12 @@ class TestCharm(unittest.TestCase):
             self.harness.charm._get_squid_config(),
             test_data.SQUID_CONFIG1)
 
-#    def test__get_squid_config_cache(self):
-#        self.maxDiff = None
-#        self.add_ingress_cache_relation()
-#        self.assertEqual(
-#            self.harness.charm._get_squid_config(),
-#            test_data.SQUID_CONFIG2)
+    def test__get_squid_config_cache(self):
+        self.maxDiff = None
+        self.add_ingress_cache_relation()
+        self.assertEqual(
+            self.harness.charm._get_squid_config(),
+            test_data.SQUID_CONFIG2)
 
     def test__get_squid_config_from_relation(self):
         self.assertEqual(

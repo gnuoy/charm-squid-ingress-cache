@@ -31,7 +31,7 @@ coredump_dir /var/spool/squid
 refresh_pattern . 0 20% 4320
 
 http_port 80 accel
-cache_peer squid-0.website-endpoints.None.svc.cluster.local parent 80 0 no-query originserver
+cache_peer mywebsite-0.website-endpoints.None.svc.cluster.local parent 80 0 no-query originserver
 
 """ # noqa
 SQUID_CONFIG2 = """
@@ -69,6 +69,6 @@ refresh_pattern -i (/cgi-bin/|\?) 0 0% 0
 refresh_pattern . 0 20% 4320
 
 http_port 80 accel
-cache_peer squid-0.website-endpoints.None.svc.cluster.local parent 80 0 no-query originserver
+cache_peer mywebsite-0.website-endpoints.None.svc.cluster.local parent 80 0 no-query originserver
 
 """ # noqa
