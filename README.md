@@ -16,7 +16,7 @@ requires the ingress relation. This charm will then provide
 a caching layer in front of the website.
 
     $ juju deploy website
-    $ juju deploy --channel=beta squid-ingress-cache
+    $ juju deploy squid-ingress-cache
     $ juju relate squid-ingress-cache:ingress-proxy website
     $ juju status
     Model  Controller          Cloud/Region        Version  SLA          Timestamp
@@ -46,7 +46,7 @@ a charm which configures an ingress resource to make a workload reachable from
 outside the k8s cluster. 
 
     $ juju deploy website
-    $ juju deploy --channel=beta squid-ingress-cache
+    $ juju deploy squid-ingress-cache
     $ juju deploy nginx-ingress-integrator ingress
     $ juju relate squid-ingress-cache:ingress-proxy website
     $ juju relate squid-ingress-cache:ingress ingress
@@ -82,6 +82,8 @@ To add an additional squid-ingress-cache
 
 ## Developing
 
+Source code is currently [Here][charm-src]
+
 Create and activate a virtualenv with the development requirements:
 
     virtualenv -p python3 venv
@@ -104,5 +106,6 @@ operator behaviour without full deployment. Just `run_tests`:
 The charm does not yet support SSL.
 
 <!-- LINKS -->
+[charm-src]: https://github.com/gnuoy/charm-squid-ingress-cache
 [squid-upstream]: http://www.squid-cache.org/
 
