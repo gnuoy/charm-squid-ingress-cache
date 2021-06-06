@@ -28,6 +28,7 @@ http_access allow localhost
 http_access allow localnet
 http_access deny all
 coredump_dir /var/spool/squid
+logformat combined %>a %ui %un [%tl] "%rm %ru HTTP/%rv" %>Hs %<st "%{Referer}>h" "%{User-Agent}>h" %Ss:%Sh
 refresh_pattern . 0 20% 4320
 
 http_port 80 accel
@@ -64,6 +65,7 @@ http_access allow localhost
 http_access allow localnet
 http_access deny all
 coredump_dir /var/spool/squid
+logformat combined %>a %ui %un [%tl] "%rm %ru HTTP/%rv" %>Hs %<st "%{Referer}>h" "%{User-Agent}>h" %Ss:%Sh
 refresh_pattern ^ftp: 1440 20% 10080 override-expire
 refresh_pattern -i (/cgi-bin/|\?) 0 0% 0 
 refresh_pattern . 0 20% 4320

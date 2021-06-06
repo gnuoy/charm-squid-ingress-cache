@@ -28,6 +28,9 @@ http_access allow localhost
 http_access allow localnet
 http_access deny all
 coredump_dir /var/spool/squid
+{% if log_format -%}
+logformat combined {{ log_format }}
+{% endif -%}
 {% if refresh_patterns -%}
 {% for refresh_pattern in refresh_patterns -%}
 {% if refresh_pattern.case_sensitive -%}

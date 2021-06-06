@@ -35,6 +35,7 @@ class SquidIngressCacheCharm(CharmBase):
 
     _stored = StoredState()
     on = IngressCharmEvents()
+    SQUID_CONFIG_OPTIONS = ['log_format']
 
     def __init__(self, *args):
         super().__init__(*args)
@@ -101,6 +102,8 @@ class SquidIngressCacheCharm(CharmBase):
         ctxt = {
             'port': ingress_config['service-port'],
             'peers': self._get_cache_peers()}
+        for k in self.SQUID_CONFIG_OPTIONS:
+            ctxt[k] = self.config[k]
         ctxt.update(squid_config)
         ctxt = {k.replace('-', '_'): v for k, v in ctxt.items()}
         return jinja_template.render(**ctxt)
@@ -121,7 +124,6 @@ class SquidIngressCacheCharm(CharmBase):
             existing_config = container.pull("/etc/squid/squid.conf").read()
         except (PathError, NotImplementedError):
             existing_config = ''
-        existing_config = ''
         # XXX This try/except is to handle the fact that push is not
         #     implemented in the test hareess yet.
         try:
