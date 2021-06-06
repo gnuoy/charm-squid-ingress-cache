@@ -165,19 +165,7 @@ class IngressRequires(Object):
                     relation.data[self.model.app][key] = str(self.config_dict[key])
 
 
-class IngressProvides(Object):
-    """This class defines the functionality for the 'provides' side of the 'ingress' relation.
-
-    Hook events observed:
-        - relation-changed
-    """
-
-    def __init__(self, charm):
-        super().__init__(charm, "ingress")
-        # Observe the relation-changed hook event and bind
-        # self.on_relation_changed() to handle the event.
-        self.framework.observe(charm.on["ingress"].relation_changed, self._on_relation_changed)
-        self.charm = charm
+class IngressBaseProvides(Object):
 
     def _on_relation_changed(self, event):
         """Handle a change to the ingress relation.
@@ -213,3 +201,30 @@ class IngressProvides(Object):
         # Create an event that our charm can use to decide it's okay to
         # configure the ingress.
         self.charm.on.ingress_available.emit()
+
+
+class IngressProvides(IngressBaseProvides):
+    """This class defines the functionality for the 'provides' side of the 'ingress' relation.
+
+    Hook events observed:
+        - relation-changed
+    """
+
+    def __init__(self, charm):
+        super().__init__(charm, "ingress")
+        # Observe the relation-changed hook event and bind
+        # self.on_relation_changed() to handle the event.
+        self.framework.observe(charm.on["ingress"].relation_changed, self._on_relation_changed)
+        self.charm = charm
+
+
+class IngressProxyProvides(IngressBaseProvides):
+
+    def __init__(self, charm):
+        super().__init__(charm, "ingress_proxy")
+        # Observe the relation-changed hook event and bind
+        # self.on_relation_changed() to handle the event.
+        self.framework.observe(
+            charm.on["ingress_proxy"].relation_changed,
+            self._on_relation_changed)
+        self.charm = charm

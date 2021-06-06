@@ -15,12 +15,13 @@ import logging
 from ops.charm import CharmBase
 from ops.framework import StoredState
 from ops.main import main
+from ops.pebble import PathError
 # from ops.model import ActiveStatus, BlockedStatus, Relation
 from ops.model import ActiveStatus, BlockedStatus
 from squid_templates import SQUID_TEMPLATE
 from charms.nginx_ingress_integrator.v0.ingress import (
     IngressRequires,
-    IngressProvides,
+    IngressProxyProvides,
     REQUIRED_INGRESS_RELATION_FIELDS,
     OPTIONAL_INGRESS_RELATION_FIELDS,
     IngressCharmEvents,
@@ -41,7 +42,7 @@ class SquidIngressCacheCharm(CharmBase):
             squid_pebble_ready=False,
         )
         # The register event handlers
-        self.ingress_proxy_provides = IngressProvides(
+        self.ingress_proxy_provides = IngressProxyProvides(
             self
         )
         self.ingress = IngressRequires(
@@ -86,8 +87,9 @@ class SquidIngressCacheCharm(CharmBase):
     def _configure_charm(self, event) -> None:
         """Configure service if minimum requirements are met."""
         if self._assess_charm_state(event):
-            self._render_config()
+            squid_config = self._get_squid_config()
             self._configure_pebble(event)
+            self._render_config(squid_config)
             self.ingress.update_config(self._get_ingress_config())
 
     def _get_squid_config(self) -> str:
@@ -103,18 +105,32 @@ class SquidIngressCacheCharm(CharmBase):
         ctxt = {k.replace('-', '_'): v for k, v in ctxt.items()}
         return jinja_template.render(**ctxt)
 
-    def _render_config(self) -> None:
+    def _restart_squid(self):
+        container = self.unit.get_container("squid")
+        logger.info("Restarting squid")
+        if container.get_service("squid").is_running():
+            container.stop("squid")
+        container.start("squid")
+
+    def _render_config(self, squid_config) -> None:
         """Push squid.conf to payload container."""
-        squid_config = self._get_squid_config()
         logger.info("Pushing new squid.conf")
         logger.info(squid_config)
         container = self.unit.get_container("squid")
+        try:
+            existing_config = container.pull("/etc/squid/squid.conf").read()
+        except (PathError, NotImplementedError):
+            existing_config = ''
+        existing_config = ''
         # XXX This try/except is to handle the fact that push is not
         #     implemented in the test hareess yet.
         try:
             container.push("/etc/squid/squid.conf", squid_config)
         except NotImplementedError:
             logger.error("Could not push /etc/squid/squid.conf to container")
+        if existing_config != squid_config:
+            logger.info("Config change detected, restarting squid")
+            self._restart_squid()
 
     def _configure_pebble(self, event) -> None:
         """Define and start squid using the Pebble API. """
